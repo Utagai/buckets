@@ -7,18 +7,22 @@ use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::Rect,
     style::{Color, Style},
-    widgets::{BarChart, Block, Borders},
+    widgets::{Bar, BarChart, BarGroup, Block, Borders},
     Frame, Terminal,
 };
 use std::{error::Error, io};
 
 struct App {
+    data: Vec<(String, u64)>,
     should_quit: bool,
 }
 
 impl App {
-    fn new() -> App {
-        App { should_quit: false }
+    fn new(data: Vec<(String, u64)>) -> App {
+        App {
+            data,
+            should_quit: false,
+        }
     }
 
     fn on_key(&mut self, key: KeyCode) {
@@ -40,7 +44,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and run it
-    let mut app = App::new();
+    let mut app = App::new(
+        [("B1", 45), ("B2", 72), ("B3", 38)]
+            .into_iter()
+            .map(|(name, val)| (name.to_string(), val))
+            .collect(),
+    );
     let res = run_app(&mut terminal, &mut app);
 
     // Restore terminal
@@ -73,16 +82,22 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
     }
 }
 
-fn ui(f: &mut Frame, _app: &App) {
-    // Bar chart data
-    let data = [("B1", 45), ("B2", 72), ("B3", 38)];
+fn bar_group_from_app(app: &App) -> BarGroup {
+    BarGroup::from(
+        &app.data
+            .iter()
+            .map(|datum| (datum.0.as_str(), datum.1))
+            .collect::<Vec<(&str, u64)>>(),
+    )
+}
 
+fn ui(f: &mut Frame, app: &App) {
     // Calculate the width needed for the chart
     // For each bar: width + gap = 9 + 3 = 12 units
     // Last bar doesn't need a gap, plus add some padding and borders
     let bar_width = 9;
     let bar_gap = 3;
-    let num_bars = data.len();
+    let num_bars = app.data.len();
     let total_width = (bar_width + bar_gap) * (num_bars - 1) + bar_width + 2; // +2 for borders.
 
     // Create a centered area with just enough width for our bars
@@ -95,7 +110,7 @@ fn ui(f: &mut Frame, _app: &App) {
                 .title("Bar Chart Example")
                 .borders(Borders::ALL),
         )
-        .data(&data)
+        .data(bar_group_from_app(app))
         .bar_width(bar_width as u16)
         .bar_gap(bar_gap as u16)
         .bar_style(Style::default().fg(Color::LightBlue))
