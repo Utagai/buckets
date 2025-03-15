@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
@@ -13,9 +14,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::{
-    collections::HashMap,
     error::Error,
-    fmt::Display,
     io::{self, Stdout},
     sync::Arc,
     time::Duration,
@@ -28,72 +27,18 @@ use tokio_util::sync::CancellationToken;
 
 use self::{
     actuator::{Actuator, FinalControlElement},
-    buckets::{n_buckets::NBuckets, Buckets},
+    buckets::{n_buckets::NBuckets, BucketType, Buckets},
+    cli::Args,
     controller::Controller,
-    policy::Policy,
     sensor::Sensor,
 };
 
-use clap::{Parser, ValueEnum};
-use std::str::FromStr;
-
 mod actuator;
 mod buckets;
+mod cli;
 mod controller;
 mod policy;
 mod sensor;
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Type of buckets to use.
-    #[arg(short, long, value_enum, default_value_t = BucketType::NBuckets)]
-    bucket_type: BucketType,
-
-    /// Policy to apply.
-    #[arg(short, long, value_enum, default_value_t = Policy::NoOp)]
-    policy: Policy,
-
-    /// Initial data in format "id1:value1,id2:value2,...".
-    #[arg(short, long, value_parser = parse_initial_data, default_value = "1:45,2:72,3:38")]
-    initial_data: HashMap<u64, u64>,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
-enum BucketType {
-    NBuckets,
-}
-
-impl Display for BucketType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BucketType::NBuckets => write!(f, "NBuckets"),
-        }
-    }
-}
-
-// Custom parser for the initial data
-fn parse_initial_data(s: &str) -> Result<HashMap<u64, u64>, String> {
-    let mut data = HashMap::new();
-
-    if s.is_empty() {
-        return Ok(data);
-    }
-
-    for pair in s.split(',') {
-        let parts: Vec<&str> = pair.split(':').collect();
-        if parts.len() != 2 {
-            return Err(format!("Invalid format for pair: {}", pair));
-        }
-
-        let id = u64::from_str(parts[0].trim()).map_err(|e| format!("Invalid ID: {}", e))?;
-        let value = u64::from_str(parts[1].trim()).map_err(|e| format!("Invalid value: {}", e))?;
-
-        data.insert(id, value);
-    }
-
-    Ok(data)
-}
 
 // Updated main function
 #[tokio::main]
