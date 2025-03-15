@@ -1,3 +1,4 @@
+use anyhow::Result;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
@@ -18,10 +19,17 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::{sync::Mutex, time::sleep};
+use tokio::{
+    sync::{mpsc, Mutex},
+    time::sleep,
+};
 use tokio_util::sync::CancellationToken;
 
-use self::buckets::NBuckets;
+use self::{
+    actuator::BucketsSystem,
+    buckets::NBuckets,
+    controller::{Controller, Sensor},
+};
 
 mod actuator;
 mod buckets;
@@ -39,7 +47,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let initial_data = HashMap::from([(1, 45), (2, 72), (3, 38)]);
     let buckets = Arc::new(Mutex::new(NBuckets::new(initial_data)));
-    let res = run(terminal.clone(), buckets).await;
+    const CONTROL_SIGNAL_BUFFER_SIZE: usize = 10;
+    let (control_signal_tx, _control_signal_rx) = mpsc::channel(CONTROL_SIGNAL_BUFFER_SIZE);
+    let controller = Arc::new(Controller::new(
+        policy::Policy::Spread,
+        buckets.clone(),
+        control_signal_tx,
+    ));
+    let res = run(terminal.clone(), buckets, controller).await;
 
     // Restore terminal
     let mut terminal = terminal.lock().await;
@@ -58,15 +73,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn run(
+async fn run<S: Sensor + BucketsSystem + Send + 'static>(
+    // TODO: Does terminal need to be wrapped in Arc + Mutex?
     terminal: Arc<Mutex<Terminal<CrosstermBackend<Stdout>>>>,
     buckets: Arc<Mutex<NBuckets>>,
-) -> io::Result<()> {
+    controller: Arc<Controller<S>>,
+) -> Result<()> {
     let ct = CancellationToken::new();
     let tick_handle = tokio::spawn(run_tick(ct.clone(), buckets.clone()));
     let tui_handle = tokio::spawn(run_tui(ct.clone(), terminal.clone(), buckets.clone()));
+    let controller_handle = tokio::spawn(run_control_loop(ct.clone(), controller.clone()));
     tui_handle.await??;
     tick_handle.await?;
+    controller_handle.await??;
     Ok(())
 }
 
@@ -113,6 +132,19 @@ async fn handle_event(ct: CancellationToken, event: Event) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+async fn run_control_loop<S: Sensor + BucketsSystem + Send + 'static>(
+    ct: CancellationToken,
+    controller: Arc<Controller<S>>,
+) -> Result<()> {
+    const CONTROLLER_RUN_LATENCY: u64 = 1;
+    loop {
+        tokio::select! {
+            _ = sleep(Duration::from_secs(CONTROLLER_RUN_LATENCY)) => controller.run().await?,
+            _ = ct.cancelled() => return Ok(()),
+        }
+    }
 }
 
 fn ui(f: &mut Frame, data: Vec<(String, u64)>) {
