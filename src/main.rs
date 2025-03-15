@@ -8,9 +8,10 @@ use crossterm::{
 use futures::{FutureExt, StreamExt};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::Rect,
-    style::{Color, Style},
-    widgets::{BarChart, Block, Borders},
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{BarChart, Block, Borders, List, ListItem},
     Frame, Terminal,
 };
 use std::{
@@ -131,12 +132,35 @@ async fn run_tui<B: Backend + Send>(
     // Start draw_latency at 0 so that we paint the first frame immediately. We then set it to 1 so
     // we draw every second afterwards.
     let mut draw_latency = 0;
+    let events = vec![
+        Line::from(vec![
+            Span::styled(
+                "ERROR: ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Failed to connect to database"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "SUCCESS: ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Data processed successfully"),
+        ]),
+        Line::from(vec![
+            Span::styled("INFO: ", Style::default().fg(Color::Blue)),
+            Span::raw("System started at "),
+            Span::styled("09:45:32", Style::default().fg(Color::Yellow)),
+        ]),
+    ];
     loop {
         tokio::select! {
             _ = ct.cancelled() => return Ok(()),
             _ = sleep(Duration::from_secs(draw_latency)) => {
                 let data = app.clone().lock().await.data();
-                terminal.lock().await.draw(|f| ui(f, data))?;
+                terminal.lock().await.draw(|f| ui(f, data, &events))?;
                 draw_latency = 1;
             },
             maybe_event = reader.next().fuse() => {
@@ -184,8 +208,7 @@ async fn run_actuator_loop<B: FinalControlElement + Send + 'static>(
     }
 }
 
-// TODO: Provide a way to view a "log" of actions being taken in the system.
-fn ui(f: &mut Frame, data: Vec<(String, u64)>) {
+fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &[Line<'_>]) {
     // Calculate the width needed for the chart
     // For each bar: width + gap = 9 + 3 = 12 units
     // Last bar doesn't need a gap, plus add some padding and borders
@@ -194,8 +217,17 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>) {
     let num_bars = data.len();
     let total_width = (bar_width + bar_gap) * (num_bars - 1) + bar_width + 2; // +2 for borders.
 
-    // Create a centered area with just enough width for our bars
-    let area = centered_rect(total_width as u16, 20, f.area());
+    // Create areas for both chart and event log
+    let main_area = centered_rect(total_width as u16, 30, f.area()); // Increase height to accommodate both
+
+    // Split the main area into two chunks vertically - top for chart, bottom for events
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(20), // Chart height stays the same
+            Constraint::Min(10),    // Event log takes remaining space (min 10)
+        ])
+        .split(main_area);
 
     // Create the bars for the bar chart:
     let bars = data
@@ -218,7 +250,20 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>) {
         .value_style(Style::default().fg(Color::White))
         .label_style(Style::default().fg(Color::Yellow));
 
-    f.render_widget(bar_chart, area);
+    // Create the event log widget with styled text
+    let events_list = List::new(
+        events
+            .iter()
+            .map(|spans| ListItem::new(spans.clone()))
+            .collect::<Vec<ListItem>>(),
+    )
+    .block(Block::default().title("Event Log").borders(Borders::ALL))
+    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+    .highlight_symbol(">> ");
+
+    // Render both widgets
+    f.render_widget(bar_chart, chunks[0]);
+    f.render_widget(events_list, chunks[1]);
 }
 
 // Helper function to create a centered rect using fixed width/height
