@@ -5,7 +5,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout},
+    layout::Rect,
     style::{Color, Style},
     widgets::{BarChart, Block, Borders},
     Frame, Terminal,
@@ -74,15 +74,19 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
 }
 
 fn ui(f: &mut Frame, _app: &App) {
-    // Create layout
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([Constraint::Percentage(100)].as_ref())
-        .split(f.area());
-
     // Bar chart data
     let data = [("B1", 45), ("B2", 72), ("B3", 38)];
+
+    // Calculate the width needed for the chart
+    // For each bar: width + gap = 9 + 3 = 12 units
+    // Last bar doesn't need a gap, plus add some padding and borders
+    let bar_width = 9;
+    let bar_gap = 3;
+    let num_bars = data.len();
+    let total_width = (bar_width + bar_gap) * (num_bars - 1) + bar_width + 2; // +2 for borders.
+
+    // Create a centered area with just enough width for our bars
+    let area = centered_rect(total_width as u16, 20, f.area());
 
     // Create bar chart
     let bar_chart = BarChart::default()
@@ -92,11 +96,24 @@ fn ui(f: &mut Frame, _app: &App) {
                 .borders(Borders::ALL),
         )
         .data(&data)
-        .bar_width(9)
-        .bar_gap(3)
+        .bar_width(bar_width as u16)
+        .bar_gap(bar_gap as u16)
         .bar_style(Style::default().fg(Color::LightBlue))
         .value_style(Style::default().fg(Color::White))
         .label_style(Style::default().fg(Color::Yellow));
 
-    f.render_widget(bar_chart, chunks[0]);
+    f.render_widget(bar_chart, area);
+}
+
+// Helper function to create a centered rect using fixed width/height
+fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {
+    let x = (r.width.saturating_sub(width)) / 2;
+    let y = (r.height.saturating_sub(height)) / 2;
+
+    Rect {
+        x: r.x + x,
+        y: r.y + y,
+        width: width.min(r.width),
+        height: height.min(r.height),
+    }
 }
