@@ -1,10 +1,9 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::{FutureExt, StreamExt};
-use rand::Rng;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::Rect,
@@ -21,41 +20,9 @@ use std::{
 use tokio::{sync::Mutex, time::sleep};
 use tokio_util::sync::CancellationToken;
 
-struct App {
-    data: Vec<(String, u64)>,
-    should_quit: bool,
-}
+use self::buckets::Buckets;
 
-impl App {
-    fn new(data: Vec<(String, u64)>) -> App {
-        App {
-            data,
-            should_quit: false,
-        }
-    }
-
-    fn modify_data(&mut self) {
-        let mut rng = rand::rng();
-
-        for (_, value) in self.data.iter_mut() {
-            let change = rng.random_range(0..=1);
-            *value = value.saturating_add_signed(change);
-        }
-    }
-
-    async fn tick(&mut self) {
-        self.modify_data();
-    }
-
-    fn on_key(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Char('q') => {
-                self.should_quit = true;
-            }
-            _ => {}
-        }
-    }
-}
+mod buckets;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -70,9 +37,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .into_iter()
         .map(|(name, val)| (name.to_string(), val))
         .collect();
-    // Create app and run it
-    let app = Arc::new(Mutex::new(App::new(initial_data)));
-    let res = run(terminal.clone(), app).await;
+    let buckets = Arc::new(Mutex::new(Buckets::new(initial_data)));
+    let res = run(terminal.clone(), buckets).await;
 
     // Restore terminal
     let mut terminal = terminal.lock().await;
@@ -93,20 +59,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn run(
     terminal: Arc<Mutex<Terminal<CrosstermBackend<Stdout>>>>,
-    app: Arc<Mutex<App>>,
+    buckets: Arc<Mutex<Buckets>>,
 ) -> io::Result<()> {
     let ct = CancellationToken::new();
-    let tick_handle = tokio::spawn(run_tick(ct.clone(), app.clone()));
-    let tui_handle = tokio::spawn(run_tui(ct.clone(), terminal.clone(), app.clone()));
+    let tick_handle = tokio::spawn(run_tick(ct.clone(), buckets.clone()));
+    let tui_handle = tokio::spawn(run_tui(ct.clone(), terminal.clone(), buckets.clone()));
     tui_handle.await??;
     tick_handle.await?;
     Ok(())
 }
 
-async fn run_tick(ct: CancellationToken, app: Arc<Mutex<App>>) {
+async fn run_tick(ct: CancellationToken, buckets: Arc<Mutex<Buckets>>) {
     loop {
         tokio::select! {
-            _ = sleep(Duration::from_secs(1)) => app.lock().await.tick().await,
+            _ = sleep(Duration::from_secs(1)) => buckets.lock().await.tick().await,
             _ = ct.cancelled() => return,
         }
     }
@@ -115,7 +81,7 @@ async fn run_tick(ct: CancellationToken, app: Arc<Mutex<App>>) {
 async fn run_tui<B: Backend + Send>(
     ct: CancellationToken,
     terminal: Arc<Mutex<Terminal<B>>>,
-    app: Arc<Mutex<App>>,
+    app: Arc<Mutex<Buckets>>,
 ) -> io::Result<()> {
     let mut reader = crossterm::event::EventStream::new();
     // Start draw_latency at 0 so that we paint the first frame immediately. We then set it to 1 so
@@ -125,28 +91,26 @@ async fn run_tui<B: Backend + Send>(
         tokio::select! {
             _ = ct.cancelled() => return Ok(()),
             _ = sleep(Duration::from_secs(draw_latency)) => {
-                let data = app.clone().lock().await.data.clone();
+                let data = app.clone().lock().await.data();
                 terminal.lock().await.draw(|f| ui(f, data))?;
                 draw_latency = 1;
             },
             maybe_event = reader.next().fuse() => {
                 if let Some(event) = maybe_event {
-                    handle_event(ct.clone(), event?, app.clone()).await?
+                    handle_event(ct.clone(), event?).await?
                 }
             },
         }
     }
 }
 
-async fn handle_event(ct: CancellationToken, event: Event, app: Arc<Mutex<App>>) -> io::Result<()> {
-    let mut app = app.lock().await;
+async fn handle_event(ct: CancellationToken, event: Event) -> io::Result<()> {
     if let Event::Key(key) = event {
-        app.on_key(key.code);
+        if let KeyCode::Char('q') = key.code {
+            ct.cancel();
+        }
     }
 
-    if app.should_quit {
-        ct.cancel();
-    }
     Ok(())
 }
 
