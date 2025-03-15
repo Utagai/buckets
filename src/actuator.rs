@@ -42,13 +42,16 @@ impl<B: BucketsSystem> Actuator<B> {
 
     pub(crate) async fn run(&mut self) -> Result<()> {
         let maybe_action = self.control_signal_rx.recv().await;
+        eprintln!("processing action: {:?}", maybe_action);
+
+        let mut buckets = self.buckets.lock().await;
         match maybe_action {
             Some(Action::Transfer {
                 source,
                 destination,
                 amount,
             }) => {
-                eprintln!("transfering {} from {} to {}", amount, source, destination);
+                buckets.transfer(source, destination, amount)?;
                 Ok(())
             }
             Some(Action::NoAction) => Ok(()),

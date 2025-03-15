@@ -27,15 +27,30 @@ impl Policy {
         eprintln!("analyzing sensor data for policy: {}", self);
         match self {
             Policy::Spread => {
-                eprintln!(
-                    "analyzing sensor data for Spread policy: {:?}",
-                    buckets_signal
-                );
-                Action::Transfer {
-                    source: 1,
-                    destination: 2,
-                    amount: 10,
+                // NOTE: This implementation is actually a bit inefficient, since we could
+                // technically try to fix the imbalance immediately instead of doing a single tiny
+                // transfer each time.
+                let min_bucket = sensor.get_smallest_bucket();
+                let max_bucket = sensor.get_largest_bucket();
+                eprintln!("min bucket: {:?}; max bucket: {:?}", min_bucket, max_bucket);
+                if min_bucket == max_bucket {
+                    // All buckets are equal, nothing to do!
+                    return Action::NoAction;
                 }
+                if let Some((min_bucket, min_qty)) = min_bucket {
+                    if let Some((max_bucket, max_qty)) = max_bucket {
+                        let diff = max_qty - min_qty;
+                        let transfer_amount = diff / 2;
+                        return Action::Transfer {
+                            source: max_bucket,
+                            destination: min_bucket,
+                            amount: transfer_amount,
+                        };
+                    }
+                }
+
+                eprintln!("unreachable?: could not unpack min/max bucket information");
+                Action::NoAction
             }
         }
     }

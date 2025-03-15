@@ -78,7 +78,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn run<S: Sensor + BucketsSystem + Send + 'static>(
-    // TODO: Does terminal need to be wrapped in Arc + Mutex?
     terminal: Arc<Mutex<Terminal<CrosstermBackend<Stdout>>>>,
     buckets: Arc<Mutex<NBuckets>>,
     controller: Arc<Controller<S>>,
