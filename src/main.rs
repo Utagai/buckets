@@ -3,6 +3,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use rand::Rng;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::Rect,
@@ -10,7 +11,7 @@ use ratatui::{
     widgets::{Bar, BarChart, BarGroup, Block, Borders},
     Frame, Terminal,
 };
-use std::{error::Error, io};
+use std::{error::Error, io, time::Duration};
 
 struct App {
     data: Vec<(String, u64)>,
@@ -23,6 +24,20 @@ impl App {
             data,
             should_quit: false,
         }
+    }
+
+    fn modify_data(data: &mut Vec<(String, u64)>) {
+        let mut rng = rand::rng();
+
+        for (_, value) in data.iter_mut() {
+            let change = rng.random_range(-1..=1);
+            *value = value.saturating_add_signed(change);
+        }
+    }
+
+    fn tick(&mut self) {
+        Self::modify_data(&mut self.data);
+        // println!("modified data: {:?}", self.data);
     }
 
     fn on_key(&mut self, key: KeyCode) {
@@ -70,14 +85,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
     loop {
+        app.tick();
         terminal.draw(|f| ui(f, app))?;
+        if crossterm::event::poll(Duration::from_secs(1))? {
+            if let Event::Key(key) = event::read()? {
+                app.on_key(key.code);
+            }
 
-        if let Event::Key(key) = event::read()? {
-            app.on_key(key.code);
-        }
-
-        if app.should_quit {
-            return Ok(());
+            if app.should_quit {
+                return Ok(());
+            }
         }
     }
 }
