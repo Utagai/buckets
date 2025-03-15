@@ -28,13 +28,15 @@ use tokio_util::sync::CancellationToken;
 use self::{
     actuator::{Actuator, BucketsSystem},
     buckets::NBuckets,
-    controller::{Controller, Sensor},
+    controller::Controller,
+    sensor::Sensor,
 };
 
 mod actuator;
 mod buckets;
 mod controller;
 mod policy;
+mod sensor;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

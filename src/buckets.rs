@@ -5,7 +5,7 @@ use itertools::Itertools;
 use rand::Rng;
 
 use crate::actuator::BucketsSystem;
-use crate::controller::Sensor;
+use crate::sensor::Sensor;
 
 // TODO: This should be a parameter.
 const MAX_QUANTITY: u64 = 100;

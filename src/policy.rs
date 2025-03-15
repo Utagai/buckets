@@ -1,12 +1,11 @@
 //! A policy implements a particular control strategy for a controller.
 //! A policy implementation takes signal from a sensor and emits a control signal based on it.
-use std::collections::HashMap;
 use std::fmt::Display;
 
 use tokio::sync::MutexGuard;
 
 use crate::actuator::Action;
-use crate::controller::Sensor;
+use crate::sensor::Sensor;
 
 pub enum Policy {
     Spread,
