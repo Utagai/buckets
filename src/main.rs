@@ -38,7 +38,7 @@ impl App {
         let mut rng = rand::rng();
 
         for (_, value) in self.data.iter_mut() {
-            let change = rng.random_range(-1..=1);
+            let change = rng.random_range(0..=1);
             *value = value.saturating_add_signed(change);
         }
     }
@@ -176,6 +176,7 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>) {
                 .borders(Borders::ALL),
         )
         .data(&bars)
+        .max(100)
         .bar_width(bar_width as u16)
         .bar_gap(bar_gap as u16)
         .bar_style(Style::default().fg(Color::LightBlue))
