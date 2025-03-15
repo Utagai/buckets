@@ -1,11 +1,14 @@
+use std::collections::HashMap;
+
+use itertools::Itertools;
 use rand::Rng;
 
 pub struct Buckets {
-    data: Vec<(String, u64)>,
+    data: HashMap<u64, u64>,
 }
 
 impl Buckets {
-    pub fn new(data: Vec<(String, u64)>) -> Buckets {
+    pub fn new(data: HashMap<u64, u64>) -> Buckets {
         Buckets { data }
     }
 
@@ -19,7 +22,11 @@ impl Buckets {
     }
 
     pub fn data(&self) -> Vec<(String, u64)> {
-        self.data.clone()
+        self.data
+            .iter()
+            .sorted()
+            .map(|(name, val)| (format!("B{}", name), *val))
+            .collect()
     }
 
     pub async fn tick(&mut self) {

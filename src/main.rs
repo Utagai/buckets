@@ -12,6 +12,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::{
+    collections::HashMap,
     error::Error,
     io::{self, Stdout},
     sync::Arc,
@@ -33,10 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let terminal = Arc::new(Mutex::new(Terminal::new(backend)?));
 
-    let initial_data = [("B1", 45), ("B2", 72), ("B3", 38)]
-        .into_iter()
-        .map(|(name, val)| (name.to_string(), val))
-        .collect();
+    let initial_data = HashMap::from([(1, 45), (2, 72), (3, 38)]);
     let buckets = Arc::new(Mutex::new(Buckets::new(initial_data)));
     let res = run(terminal.clone(), buckets).await;
 
