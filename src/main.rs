@@ -21,7 +21,7 @@ use std::{
 use tokio::{sync::Mutex, time::sleep};
 use tokio_util::sync::CancellationToken;
 
-use self::buckets::Buckets;
+use self::buckets::NBuckets;
 
 mod actuator;
 mod buckets;
@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let terminal = Arc::new(Mutex::new(Terminal::new(backend)?));
 
     let initial_data = HashMap::from([(1, 45), (2, 72), (3, 38)]);
-    let buckets = Arc::new(Mutex::new(Buckets::new(initial_data)));
+    let buckets = Arc::new(Mutex::new(NBuckets::new(initial_data)));
     let res = run(terminal.clone(), buckets).await;
 
     // Restore terminal
@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn run(
     terminal: Arc<Mutex<Terminal<CrosstermBackend<Stdout>>>>,
-    buckets: Arc<Mutex<Buckets>>,
+    buckets: Arc<Mutex<NBuckets>>,
 ) -> io::Result<()> {
     let ct = CancellationToken::new();
     let tick_handle = tokio::spawn(run_tick(ct.clone(), buckets.clone()));
@@ -70,7 +70,7 @@ async fn run(
     Ok(())
 }
 
-async fn run_tick(ct: CancellationToken, buckets: Arc<Mutex<Buckets>>) {
+async fn run_tick(ct: CancellationToken, buckets: Arc<Mutex<NBuckets>>) {
     loop {
         tokio::select! {
             _ = sleep(Duration::from_secs(1)) => buckets.lock().await.tick().await,
@@ -82,7 +82,7 @@ async fn run_tick(ct: CancellationToken, buckets: Arc<Mutex<Buckets>>) {
 async fn run_tui<B: Backend + Send>(
     ct: CancellationToken,
     terminal: Arc<Mutex<Terminal<B>>>,
-    app: Arc<Mutex<Buckets>>,
+    app: Arc<Mutex<NBuckets>>,
 ) -> io::Result<()> {
     let mut reader = crossterm::event::EventStream::new();
     // Start draw_latency at 0 so that we paint the first frame immediately. We then set it to 1 so
