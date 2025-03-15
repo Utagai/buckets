@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     const CONTROL_SIGNAL_BUFFER_SIZE: usize = 10;
     let (control_signal_tx, control_signal_rx) = mpsc::channel(CONTROL_SIGNAL_BUFFER_SIZE);
     let controller = Arc::new(Controller::new(
-        policy::Policy::Spread,
+        policy::Policy::NoOp,
         buckets.clone(),
         control_signal_tx,
     ));

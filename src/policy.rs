@@ -9,6 +9,7 @@ use crate::sensor::Sensor;
 
 pub enum Policy {
     Spread,
+    NoOp,
 }
 
 impl Display for Policy {
@@ -16,6 +17,9 @@ impl Display for Policy {
         match self {
             Policy::Spread => {
                 write!(f, "Spread")
+            }
+            Policy::NoOp => {
+                write!(f, "NoOp")
             }
         }
     }
@@ -51,6 +55,7 @@ impl Policy {
                 eprintln!("unreachable?: could not unpack min/max bucket information");
                 Action::NoAction
             }
+            Policy::NoOp => Action::NoAction,
         }
     }
 }
