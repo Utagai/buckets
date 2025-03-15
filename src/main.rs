@@ -26,8 +26,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use self::{
-    actuator::{Actuator, BucketsSystem},
-    buckets::NBuckets,
+    actuator::{Actuator, FinalControlElement},
+    buckets::{n_buckets::NBuckets, Buckets},
     controller::Controller,
     sensor::Sensor,
 };
@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let terminal = Arc::new(Mutex::new(Terminal::new(backend)?));
 
     let initial_data = HashMap::from([(1, 45), (2, 72), (3, 38)]);
+    // TODO: Allow some way to configure the kind of buckets.
     let buckets = Arc::new(Mutex::new(NBuckets::new(initial_data)));
     const CONTROL_SIGNAL_BUFFER_SIZE: usize = 10;
     let (control_signal_tx, control_signal_rx) = mpsc::channel(CONTROL_SIGNAL_BUFFER_SIZE);
@@ -79,28 +80,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn run<S: Sensor + BucketsSystem + Send + 'static>(
+async fn run<S: Buckets + Sensor + FinalControlElement + Send + 'static>(
     terminal: Arc<Mutex<Terminal<CrosstermBackend<Stdout>>>>,
     buckets: Arc<Mutex<NBuckets>>,
     controller: Arc<Controller<S>>,
     actuator: Arc<Mutex<Actuator<S>>>,
 ) -> Result<()> {
     let ct = CancellationToken::new();
-    let tick_handle = tokio::spawn(run_tick(ct.clone(), buckets.clone()));
+    let fill_handle = tokio::spawn(run_fill(ct.clone(), buckets.clone()));
     let tui_handle = tokio::spawn(run_tui(ct.clone(), terminal.clone(), buckets.clone()));
     let controller_handle = tokio::spawn(run_control_loop(ct.clone(), controller.clone()));
     let actuator_handle = tokio::spawn(run_actuator_loop(ct.clone(), actuator.clone()));
     tui_handle.await??;
-    tick_handle.await?;
+    fill_handle.await?;
     controller_handle.await??;
     actuator_handle.await??;
     Ok(())
 }
 
-async fn run_tick(ct: CancellationToken, buckets: Arc<Mutex<NBuckets>>) {
+async fn run_fill<B: Buckets>(ct: CancellationToken, buckets: Arc<Mutex<B>>) {
     loop {
         tokio::select! {
-            _ = sleep(Duration::from_secs(1)) => buckets.lock().await.tick().await,
+            _ = sleep(Duration::from_secs(1)) => buckets.lock().await.fill(),
             _ = ct.cancelled() => return,
         }
     }
@@ -155,7 +156,7 @@ async fn run_control_loop<S: Sensor + Send + 'static>(
     }
 }
 
-async fn run_actuator_loop<B: BucketsSystem + Send + 'static>(
+async fn run_actuator_loop<B: FinalControlElement + Send + 'static>(
     ct: CancellationToken,
     actuator: Arc<Mutex<Actuator<B>>>,
 ) -> Result<()> {
@@ -168,6 +169,7 @@ async fn run_actuator_loop<B: BucketsSystem + Send + 'static>(
     }
 }
 
+// TODO: Provide a way to view a "log" of actions being taken in the system.
 fn ui(f: &mut Frame, data: Vec<(String, u64)>) {
     // Calculate the width needed for the chart
     // For each bar: width + gap = 9 + 3 = 12 units

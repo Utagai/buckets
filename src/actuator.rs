@@ -21,18 +21,20 @@ pub enum Action {
     NoAction,
 }
 
-pub trait BucketsSystem {
+/// FinalControlElement represents the device that an actuator uses to apply its actions and incur
+/// changes into the control system.
+pub trait FinalControlElement {
     // TODO: Error type is bad.
     fn transfer(&mut self, source: u64, destination: u64, amount: u64) -> Result<()>;
     fn add_bucket(&mut self) -> Result<u64>;
 }
 
-pub(crate) struct Actuator<B: BucketsSystem> {
+pub(crate) struct Actuator<B: FinalControlElement> {
     buckets: Arc<Mutex<B>>,
     control_signal_rx: Receiver<Action>,
 }
 
-impl<B: BucketsSystem> Actuator<B> {
+impl<B: FinalControlElement> Actuator<B> {
     pub fn new(buckets: Arc<Mutex<B>>, control_signal_rx: Receiver<Action>) -> Self {
         Actuator {
             buckets,

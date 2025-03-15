@@ -4,11 +4,10 @@ use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use rand::Rng;
 
-use crate::actuator::BucketsSystem;
+use crate::actuator::FinalControlElement;
 use crate::sensor::Sensor;
 
-// TODO: This should be a parameter.
-const MAX_QUANTITY: u64 = 100;
+use super::{Buckets, MAX_QUANTITY};
 
 /// NBuckets represents a fixed number set of buckets that randomly, monotonically increase in
 /// fluid quantity.
@@ -22,6 +21,15 @@ impl NBuckets {
         NBuckets { data }
     }
 
+    fn get_bucket(&self, bucket: u64) -> Result<u64> {
+        self.data
+            .get(&bucket)
+            .map(|quantity| *quantity)
+            .ok_or(anyhow!("no bucket @ {}", bucket))
+    }
+}
+
+impl Buckets for NBuckets {
     fn fill(&mut self) {
         let mut rng = rand::rng();
 
@@ -31,23 +39,12 @@ impl NBuckets {
         }
     }
 
-    pub fn data(&self) -> Vec<(String, u64)> {
+    fn data(&self) -> Vec<(String, u64)> {
         self.data
             .iter()
             .sorted()
             .map(|(name, val)| (format!("B{}", name), *val))
             .collect()
-    }
-
-    fn get_bucket(&self, bucket: u64) -> Result<u64> {
-        self.data
-            .get(&bucket)
-            .map(|quantity| *quantity)
-            .ok_or(anyhow!("no bucket @ {}", bucket))
-    }
-
-    pub async fn tick(&mut self) {
-        self.fill();
     }
 }
 
@@ -61,7 +58,7 @@ impl Sensor for NBuckets {
     }
 }
 
-impl BucketsSystem for NBuckets {
+impl FinalControlElement for NBuckets {
     fn transfer(&mut self, source: u64, destination: u64, amount: u64) -> Result<()> {
         let source_amount = self.get_bucket(source)?;
         let destination_amount = self.get_bucket(destination)?;
