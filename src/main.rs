@@ -23,7 +23,10 @@ use tokio_util::sync::CancellationToken;
 
 use self::buckets::Buckets;
 
+mod actuator;
 mod buckets;
+mod controller;
+mod policy;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
