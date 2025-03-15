@@ -4,9 +4,12 @@ use std::fmt::Display;
 
 use tokio::sync::MutexGuard;
 
+use clap::ValueEnum;
+
 use crate::actuator::Action;
 use crate::sensor::Sensor;
 
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum Policy {
     Spread,
     NoOp,
@@ -35,7 +38,6 @@ impl Policy {
                 // transfer each time.
                 let min_bucket = sensor.get_smallest_bucket();
                 let max_bucket = sensor.get_largest_bucket();
-                eprintln!("min bucket: {:?}; max bucket: {:?}", min_bucket, max_bucket);
                 if min_bucket == max_bucket {
                     // All buckets are equal, nothing to do!
                     return Action::NoAction;
