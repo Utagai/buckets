@@ -26,7 +26,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use self::{
-    actuator::BucketsSystem,
+    actuator::{Actuator, BucketsSystem},
     buckets::NBuckets,
     controller::{Controller, Sensor},
 };
@@ -48,13 +48,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let initial_data = HashMap::from([(1, 45), (2, 72), (3, 38)]);
     let buckets = Arc::new(Mutex::new(NBuckets::new(initial_data)));
     const CONTROL_SIGNAL_BUFFER_SIZE: usize = 10;
-    let (control_signal_tx, _control_signal_rx) = mpsc::channel(CONTROL_SIGNAL_BUFFER_SIZE);
+    let (control_signal_tx, control_signal_rx) = mpsc::channel(CONTROL_SIGNAL_BUFFER_SIZE);
     let controller = Arc::new(Controller::new(
         policy::Policy::Spread,
         buckets.clone(),
         control_signal_tx,
     ));
-    let res = run(terminal.clone(), buckets, controller).await;
+    let actuator = Arc::new(Mutex::new(Actuator::new(
+        buckets.clone(),
+        control_signal_rx,
+    )));
+    let res = run(terminal.clone(), buckets, controller, actuator).await;
 
     // Restore terminal
     let mut terminal = terminal.lock().await;
@@ -78,14 +82,17 @@ async fn run<S: Sensor + BucketsSystem + Send + 'static>(
     terminal: Arc<Mutex<Terminal<CrosstermBackend<Stdout>>>>,
     buckets: Arc<Mutex<NBuckets>>,
     controller: Arc<Controller<S>>,
+    actuator: Arc<Mutex<Actuator<S>>>,
 ) -> Result<()> {
     let ct = CancellationToken::new();
     let tick_handle = tokio::spawn(run_tick(ct.clone(), buckets.clone()));
     let tui_handle = tokio::spawn(run_tui(ct.clone(), terminal.clone(), buckets.clone()));
     let controller_handle = tokio::spawn(run_control_loop(ct.clone(), controller.clone()));
+    let actuator_handle = tokio::spawn(run_actuator_loop(ct.clone(), actuator.clone()));
     tui_handle.await??;
     tick_handle.await?;
     controller_handle.await??;
+    actuator_handle.await??;
     Ok(())
 }
 
@@ -134,7 +141,7 @@ async fn handle_event(ct: CancellationToken, event: Event) -> io::Result<()> {
     Ok(())
 }
 
-async fn run_control_loop<S: Sensor + BucketsSystem + Send + 'static>(
+async fn run_control_loop<S: Sensor + Send + 'static>(
     ct: CancellationToken,
     controller: Arc<Controller<S>>,
 ) -> Result<()> {
@@ -142,6 +149,19 @@ async fn run_control_loop<S: Sensor + BucketsSystem + Send + 'static>(
     loop {
         tokio::select! {
             _ = sleep(Duration::from_secs(CONTROLLER_RUN_LATENCY)) => controller.run().await?,
+            _ = ct.cancelled() => return Ok(()),
+        }
+    }
+}
+
+async fn run_actuator_loop<B: BucketsSystem + Send + 'static>(
+    ct: CancellationToken,
+    actuator: Arc<Mutex<Actuator<B>>>,
+) -> Result<()> {
+    const ACTUATOR_RUN_LATENCY: u64 = 1;
+    loop {
+        tokio::select! {
+            _ = sleep(Duration::from_secs(ACTUATOR_RUN_LATENCY)) => actuator.lock().await.run().await?,
             _ = ct.cancelled() => return Ok(()),
         }
     }
