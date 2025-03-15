@@ -1,1 +1,5 @@
 /target
+
+# File used for capturing logs from stderr, allowing us to avoid disrupting the
+# TUI itself.
+log.txt
