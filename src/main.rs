@@ -31,6 +31,7 @@ use self::{
     buckets::{n_buckets::NBuckets, BucketType, Buckets},
     cli::Args,
     controller::Controller,
+    events::Events,
     sensor::Sensor,
 };
 
@@ -38,6 +39,7 @@ mod actuator;
 mod buckets;
 mod cli;
 mod controller;
+mod events;
 mod policy;
 mod sensor;
 
@@ -57,6 +59,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Use the parsed initial data
     let initial_data = args.initial_data;
 
+    let events = Arc::new(Mutex::new(Events::new()));
+
     // Create the appropriate bucket type based on args
     let buckets = match args.bucket_type {
         BucketType::NBuckets => Arc::new(Mutex::new(NBuckets::new(initial_data))),
@@ -69,15 +73,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let controller = Arc::new(Controller::new(
         args.policy,
         buckets.clone(),
+        events.clone(),
         control_signal_tx,
     ));
 
     let actuator = Arc::new(Mutex::new(Actuator::new(
         buckets.clone(),
+        events.clone(),
         control_signal_rx,
     )));
 
-    let res = run(terminal.clone(), buckets, controller, actuator).await;
+    let res = run(
+        terminal.clone(),
+        events.clone(),
+        buckets,
+        controller,
+        actuator,
+    )
+    .await;
 
     // Restore terminal
     let mut terminal = terminal.lock().await;
@@ -98,13 +111,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn run<S: Buckets + Sensor + FinalControlElement + Send + 'static>(
     terminal: Arc<Mutex<Terminal<CrosstermBackend<Stdout>>>>,
+    events: Arc<Mutex<Events>>,
     buckets: Arc<Mutex<NBuckets>>,
     controller: Arc<Controller<S>>,
     actuator: Arc<Mutex<Actuator<S>>>,
 ) -> Result<()> {
     let ct = CancellationToken::new();
-    let fill_handle = tokio::spawn(run_fill(ct.clone(), buckets.clone()));
-    let tui_handle = tokio::spawn(run_tui(ct.clone(), terminal.clone(), buckets.clone()));
+    let fill_handle = tokio::spawn(run_fill(ct.clone(), events.clone(), buckets.clone()));
+    let tui_handle = tokio::spawn(run_tui(
+        ct.clone(),
+        events,
+        terminal.clone(),
+        buckets.clone(),
+    ));
     let controller_handle = tokio::spawn(run_control_loop(ct.clone(), controller.clone()));
     let actuator_handle = tokio::spawn(run_actuator_loop(ct.clone(), actuator.clone()));
     tui_handle.await??;
@@ -114,10 +133,17 @@ async fn run<S: Buckets + Sensor + FinalControlElement + Send + 'static>(
     Ok(())
 }
 
-async fn run_fill<B: Buckets>(ct: CancellationToken, buckets: Arc<Mutex<B>>) {
+async fn run_fill<B: Buckets>(
+    ct: CancellationToken,
+    events: Arc<Mutex<Events>>,
+    buckets: Arc<Mutex<B>>,
+) {
     loop {
         tokio::select! {
-            _ = sleep(Duration::from_secs(1)) => buckets.lock().await.fill(),
+            _ = sleep(Duration::from_secs(1)) => {
+                let (bucket, change, new_val) = buckets.lock().await.fill();
+                events.lock().await.add(events::EventSource::Filler, format!("filled +{} to bucket {} => {}", change, bucket, new_val));
+            },
             _ = ct.cancelled() => return,
         }
     }
@@ -125,6 +151,7 @@ async fn run_fill<B: Buckets>(ct: CancellationToken, buckets: Arc<Mutex<B>>) {
 
 async fn run_tui<B: Backend + Send>(
     ct: CancellationToken,
+    events: Arc<Mutex<Events>>,
     terminal: Arc<Mutex<Terminal<B>>>,
     app: Arc<Mutex<NBuckets>>,
 ) -> io::Result<()> {
@@ -132,35 +159,32 @@ async fn run_tui<B: Backend + Send>(
     // Start draw_latency at 0 so that we paint the first frame immediately. We then set it to 1 so
     // we draw every second afterwards.
     let mut draw_latency = 0;
-    let events = vec![
-        Line::from(vec![
-            Span::styled(
-                "ERROR: ",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("Failed to connect to database"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "SUCCESS: ",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("Data processed successfully"),
-        ]),
-        Line::from(vec![
-            Span::styled("INFO: ", Style::default().fg(Color::Blue)),
-            Span::raw("System started at "),
-            Span::styled("09:45:32", Style::default().fg(Color::Yellow)),
-        ]),
-    ];
     loop {
         tokio::select! {
             _ = ct.cancelled() => return Ok(()),
             _ = sleep(Duration::from_secs(draw_latency)) => {
                 let data = app.clone().lock().await.data();
-                terminal.lock().await.draw(|f| ui(f, data, &events))?;
+                let lines = events
+                    .lock()
+                    .await
+                    .get_all()
+                    .iter()
+                    .map(|event| {
+                        Line::from(vec![Span::styled(
+                            format!("{} | ", event.timestamp.format("%H:%M:%S")),
+                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                        ),
+                            Span::styled(
+                            format!("{} ", event.source),
+                            Style::default().fg(event.source.color()).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{}", event.message),
+                            Style::default().fg(Color::White).add_modifier(Modifier::ITALIC),
+                        )])
+                    })
+                    .collect();
+                terminal.lock().await.draw(|f| ui(f, data, &lines))?;
                 draw_latency = 1;
             },
             maybe_event = reader.next().fuse() => {
@@ -208,26 +232,39 @@ async fn run_actuator_loop<B: FinalControlElement + Send + 'static>(
     }
 }
 
-fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &[Line<'_>]) {
+fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &Vec<Line<'_>>) {
     // Calculate the width needed for the chart
     // For each bar: width + gap = 9 + 3 = 12 units
     // Last bar doesn't need a gap, plus add some padding and borders
     let bar_width = 9;
     let bar_gap = 3;
     let num_bars = data.len();
-    let total_width = (bar_width + bar_gap) * (num_bars - 1) + bar_width + 2; // +2 for borders.
+    let chart_width = (bar_width + bar_gap) * (num_bars - 1) + bar_width + 2; // +2 for borders
 
-    // Create areas for both chart and event log
-    let main_area = centered_rect(total_width as u16, 30, f.area()); // Increase height to accommodate both
+    // Calculate the full width for the layout (wider for event log)
+    let total_layout_width = (chart_width + 20).max((f.area().width - 10) as usize); // At least 20 units wider than chart, but respect screen size
+
+    // Create the main area with the calculated width
+    let main_area = centered_rect(total_layout_width as u16, 30, f.area());
 
     // Split the main area into two chunks vertically - top for chart, bottom for events
-    let chunks = Layout::default()
+    let vertical_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(20), // Chart height stays the same
             Constraint::Min(10),    // Event log takes remaining space (min 10)
         ])
         .split(main_area);
+
+    // For the top chunk, create a centered area for the bar chart with its specific width
+    let chart_area = centered_rect_horizontal(
+        chart_width as u16,
+        vertical_chunks[0].height,
+        vertical_chunks[0],
+    );
+
+    // Event log uses the full width of the bottom chunk
+    let event_log_area = vertical_chunks[1];
 
     // Create the bars for the bar chart:
     let bars = data
@@ -262,8 +299,19 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &[Line<'_>]) {
     .highlight_symbol(">> ");
 
     // Render both widgets
-    f.render_widget(bar_chart, chunks[0]);
-    f.render_widget(events_list, chunks[1]);
+    f.render_widget(bar_chart, chart_area);
+    f.render_widget(events_list, event_log_area);
+}
+
+// Add this helper function for horizontal centering with specific width
+fn centered_rect_horizontal(width: u16, height: u16, r: Rect) -> Rect {
+    let horizontal_padding = (r.width.saturating_sub(width)) / 2;
+    Rect::new(
+        r.x + horizontal_padding,
+        r.y,
+        width.min(r.width),
+        height.min(r.height),
+    )
 }
 
 // Helper function to create a centered rect using fixed width/height

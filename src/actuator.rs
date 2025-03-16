@@ -5,11 +5,14 @@
 //! "dumb", in that it knows how to do the actions and will do then when instructed by the control
 //! signal, but has absolutely no idea about the original sensor data that encouraged this action.
 
+use std::fmt::Display;
 use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
+
+use crate::events::Events;
 
 #[derive(Debug)]
 pub enum Action {
@@ -19,6 +22,19 @@ pub enum Action {
         amount: u64,
     },
     NoAction,
+}
+
+impl Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transfer {
+                source,
+                destination,
+                amount,
+            } => write!(f, "Transfer {} -({})-> {}", source, amount, destination),
+            Self::NoAction => write!(f, "NoAction"),
+        }
+    }
 }
 
 /// FinalControlElement represents the device that an actuator uses to apply its actions and incur
@@ -31,13 +47,19 @@ pub trait FinalControlElement {
 
 pub(crate) struct Actuator<B: FinalControlElement> {
     buckets: Arc<Mutex<B>>,
+    events: Arc<Mutex<Events>>,
     control_signal_rx: Receiver<Action>,
 }
 
 impl<B: FinalControlElement> Actuator<B> {
-    pub fn new(buckets: Arc<Mutex<B>>, control_signal_rx: Receiver<Action>) -> Self {
+    pub fn new(
+        buckets: Arc<Mutex<B>>,
+        events: Arc<Mutex<Events>>,
+        control_signal_rx: Receiver<Action>,
+    ) -> Self {
         Actuator {
             buckets,
+            events,
             control_signal_rx,
         }
     }
@@ -48,12 +70,18 @@ impl<B: FinalControlElement> Actuator<B> {
 
         let mut buckets = self.buckets.lock().await;
         match maybe_action {
-            Some(Action::Transfer {
-                source,
-                destination,
-                amount,
-            }) => {
+            Some(
+                action @ Action::Transfer {
+                    source,
+                    destination,
+                    amount,
+                },
+            ) => {
                 buckets.transfer(source, destination, amount)?;
+                self.events.lock().await.add(
+                    crate::events::EventSource::Actuator,
+                    format!("applied action: {}", action),
+                );
                 Ok(())
             }
             Some(Action::NoAction) => Ok(()),

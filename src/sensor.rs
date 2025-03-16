@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
-// TODO: We should have a dedicated type for bucket ID.
+// TODO: We should have a dedicated type for bucket ID & for bucket ID + value tuple.
 pub trait Sensor {
     fn buckets(&self) -> &HashMap<u64, u64>;
     fn get_smallest_bucket(&self) -> Option<(u64, u64)> {

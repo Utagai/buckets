@@ -30,13 +30,16 @@ impl NBuckets {
 }
 
 impl Buckets for NBuckets {
-    fn fill(&mut self) {
+    fn fill(&mut self) -> (u64, u64, u64) {
         let mut rng = rand::rng();
 
-        for (_, value) in self.data.iter_mut() {
-            let change = rng.random_range(0..=1);
-            *value = value.saturating_add_signed(change);
-        }
+        let bucket = rng.random_range(1..=self.data.len()) as u64;
+
+        let change = rng.random_range(0..=1) as u64;
+        let value = self.data.get_mut(&bucket).expect("unreachable");
+        *value = value.saturating_add(change);
+
+        (bucket, change, *value)
     }
 
     fn data(&self) -> Vec<(String, u64)> {

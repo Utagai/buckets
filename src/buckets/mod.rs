@@ -8,7 +8,7 @@ pub mod n_buckets;
 pub const MAX_QUANTITY: u64 = 100;
 
 pub(crate) trait Buckets {
-    fn fill(&mut self);
+    fn fill(&mut self) -> (u64, u64, u64);
     fn data(&self) -> Vec<(String, u64)>;
 }
 
