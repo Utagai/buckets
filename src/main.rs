@@ -251,27 +251,6 @@ async fn run_actuator_loop<B: FinalControlElement + Send + 'static>(
     }
 }
 
-// Define a struct to maintain the scroll state
-struct EventLogState {
-    list_state: ListState,
-}
-
-impl EventLogState {
-    fn new() -> Self {
-        let mut list_state = ListState::default();
-        list_state.select(Some(0)); // Initially select the first item
-        Self { list_state }
-    }
-
-    // Update the state to scroll to the newest entry
-    fn update(&mut self, items_count: usize) {
-        if items_count > 0 {
-            // Scroll to the bottom (newest entry)
-            self.list_state.select(Some(items_count - 1));
-        }
-    }
-}
-
 fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &Vec<Line<'_>>) {
     // Calculate the width needed for the chart
     // For each bar: width + gap = 9 + 3 = 12 units
