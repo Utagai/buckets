@@ -14,6 +14,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::actuator::{Action, Actuator};
 use crate::events::{EventSource, Events};
@@ -41,7 +42,8 @@ impl<S: Sensor> Controller<S> {
             control_signal_tx,
         }
     }
-    pub async fn run(&self) -> Result<()> {
+
+    pub async fn run(&self, ct: CancellationToken) -> Result<()> {
         let sensor = self.sensor.lock().await;
         let action = self.policy.analyze(sensor);
         self.events.lock().await.add(
@@ -51,7 +53,12 @@ impl<S: Sensor> Controller<S> {
                 self.policy, action
             ),
         );
-        self.control_signal_tx.send(action).await?;
-        Ok(())
+        tokio::select! {
+            res = self.control_signal_tx.send(action) => {
+                res?;
+                Ok(())
+            },
+            _ = ct.cancelled() => Ok(())
+        }
     }
 }

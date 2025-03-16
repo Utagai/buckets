@@ -11,6 +11,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::events::Events;
 
@@ -64,8 +65,11 @@ impl<B: FinalControlElement> Actuator<B> {
         }
     }
 
-    pub(crate) async fn run(&mut self) -> Result<()> {
-        let maybe_action = self.control_signal_rx.recv().await;
+    pub(crate) async fn run(&mut self, ct: CancellationToken) -> Result<()> {
+        let maybe_action = tokio::select! {
+            maybe_action = self.control_signal_rx.recv() => maybe_action,
+            _ = ct.cancelled() => return Ok(()),
+        };
         eprintln!("processing action: {:?}", maybe_action);
 
         let mut buckets = self.buckets.lock().await;

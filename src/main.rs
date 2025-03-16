@@ -142,11 +142,11 @@ async fn run<S: Buckets + Sensor + FinalControlElement + Send + 'static>(
         actuator.clone(),
     ));
     let (tui_res, fill_res, controller_res, actuator_res) =
-        tokio::join!(tui_handle, fill_handle, controller_handle, actuator_handle);
-    tui_res??;
-    fill_res??;
-    controller_res??;
-    actuator_res??;
+        tokio::try_join!(tui_handle, fill_handle, controller_handle, actuator_handle)?;
+    tui_res?;
+    fill_res?;
+    controller_res?;
+    actuator_res?;
     Ok(())
 }
 
@@ -162,7 +162,7 @@ async fn run_fill<B: Buckets>(
                 let (bucket, change, new_val) = buckets.lock().await.fill();
                 events.lock().await.add(events::EventSource::Filler, format!("filled +{} to bucket {} => {}", change, bucket, new_val));
             },
-            _ = ct.cancelled() => return Ok(()),
+            _ = ct.cancelled() => return Ok(())
         }
     }
 }
@@ -232,7 +232,7 @@ async fn run_control_loop<S: Sensor + Send + 'static>(
 ) -> Result<()> {
     loop {
         tokio::select! {
-            _ = sleep(Duration::from_millis(controller_latency_ms)) => controller.run().await?,
+            _ = sleep(Duration::from_millis(controller_latency_ms)) => controller.run(ct.clone()).await?,
             _ = ct.cancelled() => return Ok(()),
         }
     }
@@ -245,7 +245,7 @@ async fn run_actuator_loop<B: FinalControlElement + Send + 'static>(
 ) -> Result<()> {
     loop {
         tokio::select! {
-            _ = sleep(Duration::from_millis(actuator_latency_ms)) => actuator.lock().await.run().await?,
+            _ = sleep(Duration::from_millis(actuator_latency_ms)) => actuator.lock().await.run(ct.clone()).await?,
             _ = ct.cancelled() => return Ok(()),
         }
     }
