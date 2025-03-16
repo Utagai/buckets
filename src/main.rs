@@ -11,7 +11,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{BarChart, Block, Borders, List, ListItem},
+    widgets::{BarChart, Block, Borders, List, ListItem, ListState},
     Frame, Terminal,
 };
 use std::{
@@ -232,6 +232,27 @@ async fn run_actuator_loop<B: FinalControlElement + Send + 'static>(
     }
 }
 
+// Define a struct to maintain the scroll state
+struct EventLogState {
+    list_state: ListState,
+}
+
+impl EventLogState {
+    fn new() -> Self {
+        let mut list_state = ListState::default();
+        list_state.select(Some(0)); // Initially select the first item
+        Self { list_state }
+    }
+
+    // Update the state to scroll to the newest entry
+    fn update(&mut self, items_count: usize) {
+        if items_count > 0 {
+            // Scroll to the bottom (newest entry)
+            self.list_state.select(Some(items_count - 1));
+        }
+    }
+}
+
 fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &Vec<Line<'_>>) {
     // Calculate the width needed for the chart
     // For each bar: width + gap = 9 + 3 = 12 units
@@ -252,7 +273,7 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &Vec<Line<'_>>) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(20), // Chart height stays the same
-            Constraint::Min(10),    // Event log takes remaining space (min 10)
+            Constraint::Length(10), // Event log takes remaining space (min 10)
         ])
         .split(main_area);
 
@@ -294,16 +315,21 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &Vec<Line<'_>>) {
             .map(|spans| ListItem::new(spans.clone()))
             .collect::<Vec<ListItem>>(),
     )
-    .block(Block::default().title("Event Log").borders(Borders::ALL))
-    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-    .highlight_symbol(">> ");
+    .block(Block::default().title("Event Log").borders(Borders::ALL));
+    let mut list_state = ListState::default();
+    // Basically, if we reach a length of events that exceeds the available vertical space, start
+    // automatically setting the list's offset to the 8th last item and render from there,
+    // effectively scrolling.
+    if events.len() >= 8 {
+        *list_state.offset_mut() = events.len() - 8;
+    }
 
     // Render both widgets
     f.render_widget(bar_chart, chart_area);
-    f.render_widget(events_list, event_log_area);
+    f.render_stateful_widget(events_list, event_log_area, &mut list_state);
 }
 
-// Add this helper function for horizontal centering with specific width
+// Helper function for horizontal centering with specific width
 fn centered_rect_horizontal(width: u16, height: u16, r: Rect) -> Rect {
     let horizontal_padding = (r.width.saturating_sub(width)) / 2;
     Rect::new(
