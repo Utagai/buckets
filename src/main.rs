@@ -269,11 +269,12 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &Vec<Line<'_>>) {
     let main_area = centered_rect(total_layout_width as u16, 30, f.area());
 
     // Split the main area into two chunks vertically - top for chart, bottom for events
+    const EVENT_LOG_HEIGHT: usize = 15;
     let vertical_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(20), // Chart height stays the same
-            Constraint::Length(10), // Event log takes remaining space (min 10)
+            Constraint::Length(20),                      // Chart height stays the same
+            Constraint::Length(EVENT_LOG_HEIGHT as u16), // Event log takes remaining space (min 10)
         ])
         .split(main_area);
 
@@ -320,8 +321,8 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &Vec<Line<'_>>) {
     // Basically, if we reach a length of events that exceeds the available vertical space, start
     // automatically setting the list's offset to the 8th last item and render from there,
     // effectively scrolling.
-    if events.len() >= 8 {
-        *list_state.offset_mut() = events.len() - 8;
+    if events.len() >= EVENT_LOG_HEIGHT {
+        *list_state.offset_mut() = events.len() - EVENT_LOG_HEIGHT;
     }
 
     // Render both widgets
