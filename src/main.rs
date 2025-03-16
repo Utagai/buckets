@@ -315,11 +315,7 @@ fn ui(f: &mut Frame, data: Vec<(String, u64)>, events: &Vec<Line<'_>>) {
 
     // Create bar chart
     let bar_chart = BarChart::default()
-        .block(
-            Block::default()
-                .title("Bar Chart Example")
-                .borders(Borders::ALL),
-        )
+        .block(Block::default().title("Buckets").borders(Borders::ALL))
         .data(&bars)
         .max(100)
         .bar_width(bar_width as u16)
