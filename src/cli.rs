@@ -5,7 +5,7 @@ use clap::Parser;
 use crate::buckets::BucketType;
 use crate::policy::Policy;
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Type of buckets to use.
@@ -19,6 +19,18 @@ pub struct Args {
     /// Initial data in format "id1:value1,id2:value2,...".
     #[arg(short, long, value_parser = parse_initial_data, default_value = "1:45,2:72,3:38")]
     pub initial_data: HashMap<u64, u64>,
+
+    /// Controller loop latency (ms).
+    #[arg(short, long, default_value_t = 1000)]
+    pub controller_latency: u64,
+
+    /// Actuator loop latency (ms).
+    #[arg(short, long, default_value_t = 1000)]
+    pub actuator_latency: u64,
+
+    /// Fill loop latency (ms).
+    #[arg(short, long, default_value_t = 1000)]
+    pub fill_latency: u64,
 }
 
 // Custom parser for the initial data

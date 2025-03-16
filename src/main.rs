@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let terminal = Arc::new(Mutex::new(Terminal::new(backend)?));
 
     // Use the parsed initial data
-    let initial_data = args.initial_data;
+    let initial_data = args.initial_data.clone();
 
     let events = Arc::new(Mutex::new(Events::new()));
 
@@ -84,6 +84,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )));
 
     let res = run(
+        args,
         terminal.clone(),
         events.clone(),
         buckets,
@@ -103,13 +104,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        println!("{:?}", err);
+        println!("failed to run simulation: {:?}", err);
     }
 
     Ok(())
 }
 
 async fn run<S: Buckets + Sensor + FinalControlElement + Send + 'static>(
+    args: Args,
     terminal: Arc<Mutex<Terminal<CrosstermBackend<Stdout>>>>,
     events: Arc<Mutex<Events>>,
     buckets: Arc<Mutex<NBuckets>>,
@@ -117,34 +119,50 @@ async fn run<S: Buckets + Sensor + FinalControlElement + Send + 'static>(
     actuator: Arc<Mutex<Actuator<S>>>,
 ) -> Result<()> {
     let ct = CancellationToken::new();
-    let fill_handle = tokio::spawn(run_fill(ct.clone(), events.clone(), buckets.clone()));
+    let fill_handle = tokio::spawn(run_fill(
+        ct.clone(),
+        args.fill_latency,
+        events.clone(),
+        buckets.clone(),
+    ));
     let tui_handle = tokio::spawn(run_tui(
         ct.clone(),
         events,
         terminal.clone(),
         buckets.clone(),
     ));
-    let controller_handle = tokio::spawn(run_control_loop(ct.clone(), controller.clone()));
-    let actuator_handle = tokio::spawn(run_actuator_loop(ct.clone(), actuator.clone()));
-    tui_handle.await??;
-    fill_handle.await?;
-    controller_handle.await??;
-    actuator_handle.await??;
+    let controller_handle = tokio::spawn(run_control_loop(
+        ct.clone(),
+        args.controller_latency,
+        controller.clone(),
+    ));
+    let actuator_handle = tokio::spawn(run_actuator_loop(
+        ct.clone(),
+        args.actuator_latency,
+        actuator.clone(),
+    ));
+    let (tui_res, fill_res, controller_res, actuator_res) =
+        tokio::join!(tui_handle, fill_handle, controller_handle, actuator_handle);
+    tui_res??;
+    fill_res??;
+    controller_res??;
+    actuator_res??;
     Ok(())
 }
 
 async fn run_fill<B: Buckets>(
     ct: CancellationToken,
+    fill_latency_ms: u64,
     events: Arc<Mutex<Events>>,
     buckets: Arc<Mutex<B>>,
-) {
+) -> Result<()> {
     loop {
         tokio::select! {
-            _ = sleep(Duration::from_secs(1)) => {
+            _ = sleep(Duration::from_millis(fill_latency_ms)) => {
                 let (bucket, change, new_val) = buckets.lock().await.fill();
                 events.lock().await.add(events::EventSource::Filler, format!("filled +{} to bucket {} => {}", change, bucket, new_val));
             },
-            _ = ct.cancelled() => return,
+            _ = ct.cancelled() => return Ok(()),
         }
     }
 }
@@ -158,11 +176,12 @@ async fn run_tui<B: Backend + Send>(
     let mut reader = crossterm::event::EventStream::new();
     // Start draw_latency at 0 so that we paint the first frame immediately. We then set it to 1 so
     // we draw every second afterwards.
-    let mut draw_latency = 0;
+    const DRAW_LATENCY_MS: u64 = 200;
+    let mut draw_latency_ms = 0;
     loop {
         tokio::select! {
             _ = ct.cancelled() => return Ok(()),
-            _ = sleep(Duration::from_secs(draw_latency)) => {
+            _ = sleep(Duration::from_millis(draw_latency_ms)) => {
                 let data = app.clone().lock().await.data();
                 let lines = events
                     .lock()
@@ -185,7 +204,7 @@ async fn run_tui<B: Backend + Send>(
                     })
                     .collect();
                 terminal.lock().await.draw(|f| ui(f, data, &lines))?;
-                draw_latency = 1;
+                draw_latency_ms = DRAW_LATENCY_MS;
             },
             maybe_event = reader.next().fuse() => {
                 if let Some(event) = maybe_event {
@@ -208,12 +227,12 @@ async fn handle_event(ct: CancellationToken, event: Event) -> io::Result<()> {
 
 async fn run_control_loop<S: Sensor + Send + 'static>(
     ct: CancellationToken,
+    controller_latency_ms: u64,
     controller: Arc<Controller<S>>,
 ) -> Result<()> {
-    const CONTROLLER_RUN_LATENCY: u64 = 1;
     loop {
         tokio::select! {
-            _ = sleep(Duration::from_secs(CONTROLLER_RUN_LATENCY)) => controller.run().await?,
+            _ = sleep(Duration::from_millis(controller_latency_ms)) => controller.run().await?,
             _ = ct.cancelled() => return Ok(()),
         }
     }
@@ -221,12 +240,12 @@ async fn run_control_loop<S: Sensor + Send + 'static>(
 
 async fn run_actuator_loop<B: FinalControlElement + Send + 'static>(
     ct: CancellationToken,
+    actuator_latency_ms: u64,
     actuator: Arc<Mutex<Actuator<B>>>,
 ) -> Result<()> {
-    const ACTUATOR_RUN_LATENCY: u64 = 1;
     loop {
         tokio::select! {
-            _ = sleep(Duration::from_secs(ACTUATOR_RUN_LATENCY)) => actuator.lock().await.run().await?,
+            _ = sleep(Duration::from_millis(actuator_latency_ms)) => actuator.lock().await.run().await?,
             _ = ct.cancelled() => return Ok(()),
         }
     }
